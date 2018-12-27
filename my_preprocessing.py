@@ -1,57 +1,26 @@
 import pandas as pd
 import numpy as np
-from functools import partial
 from multiprocessing import Pool, cpu_count
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.preprocessing import LabelEncoder
 
 FLOAT_TYPE = np.float32
 
 
 def get_freq(x):
-    ''' 计算最频繁项 '''
     if len(x) == 0:
         return np.NaN
     return pd.Series(x).value_counts().idxmax()
 
 
 def map_arr(x, value_map):
-    ''' 包装pandas.Series.map, 用于ndarray '''
     return pd.Series(x).map(value_map).values
 
 
 def value_counts(x):
-    ''' 包装pandas.Series.value_counts, 用于ndarray '''
     return pd.Series(x).value_counts().sort_index()
 
 
 def calc_post_proba(x, y):
-    ''' 按x数值分组统计后验概率 '''
     return pd.DataFrame({"x": x, "y": y}).groupby("x").y.mean()
-
-
-def calc_direction(arr):
-    map_bin2code = {0: 1, 1: 2, 11: -1, 10: 0}
-    arr = np.array(arr)
-    offset = (arr[:-1] > arr[1:]).astype("int")
-    return np.array([2 if offset[0] else 0] +
-                    [map_bin2code[10 * l_ + r_] for l_, r_ in zip(offset[:-1], offset[1:])] +
-                    [0 if offset[-1] else 2])
-
-
-def calc_shape(directions, remarks="VA\\/W"):
-    ''' 字符表示单调性 '''
-
-    middel = directions[1:-1]
-    if sum(1 for e in middel if e in {0, 1}) > 1:
-        return remarks[4]
-    elif 2 in middel:
-        return remarks[0]
-    elif 0 in middel:
-        return remarks[1]
-    elif 1 in middel:
-        return remarks[2]
-    return remarks[3]
 
 
 def calc_woe(x, y, alpha=0):
@@ -96,37 +65,8 @@ class WOEEncoder:
         return X_copy
 
     def fit_transform(self, X, y):
-        """
-        拟合变换函数
-
-        Parameters
-        ----------
-        X : numpy array of shape [n_samples, n_features]
-            训练数据
-
-        y : numpy array of shape [n_samples], binary
-            训练标签，0-1二值
-
-        Returns
-        -------
-        X_copy : numpy array of shape [n_samples, n_features]
-            WOE编码后的训练数据
-        """
         self.fit(X, y)
         return self.transform(X)
-
-
-def calc_woe_mp_bak(argv):
-    ''' 计算WOE，多进程。 '''
-    X = argv["X"]
-    y = argv["y"]
-    col_ = argv["col_"]
-    alpha_ = argv["alpha_"]
-
-    col_arr = X[:, col_]
-    woe_data = calc_woe(col_arr, y, alpha_)
-    iv = ((woe_data.pos_rate - woe_data.neg_rate) * woe_data.woe).sum()
-    return (col_, woe_data, iv)
 
 
 def calc_woe_mp(argv):
@@ -177,25 +117,6 @@ def replace_null(arr, unknown_token_num=-1, unknown_token_str="NaN", known_set=N
     return series.replace(np.NaN, token)
 
 
-class LabelEncoderWrapper():
-    ''' wrapper of sklearn.LabelEncoder, which can handle null values and stranger class '''
-
-    def __init__(self, unknown_token_num=-1, unknown_token_str="NaN"):
-        self.encoder = LabelEncoder()
-        self.unknown_token_num = unknown_token_num
-        self.unknown_token_str = unknown_token_str
-
-    def fit_transform(self, x):
-        x = replace_null(x, self.unknown_token_num, self.unknown_token_str)
-        result = self.encoder.fit_transform(x)
-        self.classes_ = self.encoder.classes_
-        return result
-
-    def transform(self, x):
-        x = replace_null(x, self.unknown_token_num, self.unknown_token_str, self.classes_)
-        return self.encoder.transform(x)
-
-
 def get_value_map(arr, default=-1):
     values = pd.Series(arr).unique()
     value_map = dict(zip(values, range(values.shape[0])))
@@ -223,21 +144,8 @@ class MyLabelEncoder():
 
 
 def kfold_normalize(X, y, group, encoder):
-    """ kfold正则化，对评分卡作用不大 """
     woe_oof = np.zeros(X.shape)
     for grp in sorted(np.unique(group)):
         encoder.fit(X[group != grp], y[group != grp])
         woe_oof[group == grp] = encoder.transform(X[group == grp])
     return woe_oof
-
-
-def woe_loo_normalize(X, y, alpha=0):
-    """ 留一正则化, ＠not implemeted """
-    woe_loo = X.copy()
-    return woe_loo
-
-
-def woe_expand_normalize(X, y, alpha=0):
-    """ 累加正则化, @not implemeted """
-    woe_expand = X.copy()
-    return woe_expand
